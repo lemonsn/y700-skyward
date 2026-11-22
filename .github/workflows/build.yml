@@ -10,7 +10,7 @@ permissions:
 
 env:
   SKYWARD_REPO: https://github.com/lemonsn/skyward.git
-  SKYWARD_COMMIT: c3ab24ad0cd9ecfe0d1692778cecf4c8e1b57b55
+  SKYWARD_COMMIT: 73a9c567c20aec4038b89b02e5884a8c7eac14f4
   STOCK_URL: https://github.com/lemonsn/y700-skyward/releases/download/stock-elden/recovery.img
   STOCK_SHA256: f5684d262a702376d94f5f8338f176e264f81176ef6e4696091da5bf88e7de08
   PARTITION_SIZE: "104857600"
