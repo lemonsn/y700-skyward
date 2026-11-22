@@ -11,7 +11,7 @@
 | 启动、界面、主题、语言切换 | 可用（默认简体中文） |
 | 触摸 | 可用（Novatek `nvt_36xxx`，开机由第一阶段 init 加载） |
 | 背光、RAM、存储显示 | 已修（读设备树属性 / `sysinfo()` / `BLKGETSIZE64`） |
-| 解密 | 进行中：密钥链受 SELinux 限制，逐条绕过后仍在验证 |
+| 解密 | 密钥链已逐条绕过 SELinux 拒绝，当前验证 VINTF 清单解析（v16） |
 | Wi-Fi、振动、备份、双系统、OTA | 未验证 |
 
 ## 设备事实（实测）
@@ -41,6 +41,7 @@ tools/patch_cmdline.py    # 往镜像 cmdline 追加参数
 - **显示/模块**：读面板自身的亮度属性（`qcom,mdss-brightness-max-level` 等，读不到退回全量程）；`system_dlkm` 两种布局；模块依赖跨目录查找
 - **文件与信息**：可写路径从 `/skyward/...` 挪到 `/tmp/skyward/...`；语言优先 `ro.product.locale.language`+`region`；RAM 用 `sysinfo()`、存储用 `BLKGETSIZE64`
 - **SELinux 容错**（这台机器 `recovery` 域限制很多）：uevent socket、`/dev` 遍历与 chown、`/proc/meminfo`、`/mem_sleep`、固件回退写、`ro.*` 属性、执行 vendor 脚本、VINTF 描述准备、逐服务启动
+- **密钥链接通**：模拟 init 解析属性时执行 vendor 脚本失败只记录；VINTF 只按 `manifest.xml`/`manifest_<sku>.xml` 找，缺 `manifest.xml` 时回退到 `manifest_<ro.board.platform>.xml`；`services::start`/`keys::start` 改为逐个启动，一个被拒不再中断整条链
 - **诊断留痕**：`trace.rs` 把启动阶段写到两个 recovery 分区 64 MiB 处，每次启动先清零
 
 ## 构建
@@ -79,6 +80,23 @@ dd if=/dev/block/by-name/recovery_b bs=4096 skip=16384 count=16 | tr -d '\0'
 ```
 
 最后一行是最远走到的阶段；`failed: ...` 是失败原因，`... is not started: ...` 是某个密钥程序被拒的原因。
+
+## 解密链排查记录（留痕逐条得出）
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 卡 logo | 背光只认小米设备树属性 | 读 `qcom,mdss-brightness-max-level`/`qcom,mdss-dsi-bl-max-level`，读不到退回全量程 |
+| `make /skyward/run: Permission denied` | recovery 域不能在根目录建目录 | 所有可写路径改到 `/tmp/skyward/...` |
+| `read /proc/meminfo` / `/dev/pts` 被拒 | 同上，数据只用于展示 | 容错；RAM/存储改用 `sysinfo()` / `BLKGETSIZE64` |
+| 黑屏 | `write s2idle to /sys/power/mem_sleep` 失败导致 UI 循环退出 | 写失败只记录 |
+| `read /dev/pts` 中止 bring_up | `/dev` 递归遍历遇无权限目录 | 读不到就跳过 |
+| `open the uevent socket` 被拒 | netlink socket 被策略拦 | 改用空闲管道，无 uevent 也能跑 |
+| `give /dev/membuf ... set the owner` | 单节点 chown 被拒 | 逐节点容错 |
+| `write 1 to .../force_sysfs_fallback` | 固件回退开关被拒 | 由 init rc 在 early-init 写；固件同时进 ramdisk `/lib/firmware` |
+| `finit_module ... EPERM` | recovery 域无 `CAP_SYS_MODULE` | 模块交给 init insmod（`sys.skyward.modules` 触发） |
+| `open /system/etc/vintf/manifest ...` 被拒 | VINTF 描述准备要 chmod/写 /system | 准备动作尽力而为 |
+| `run /vendor/bin/init.qti.qcv.sh` 被拒 | 解析属性时要执行 vendor 脚本 | 执行失败只记录 |
+| `the phone describes no credential service` | 清单按 SoC 分文件，无 `manifest.xml`，只读到无 gatekeeper 的碎片 | 回退到 `manifest_<ro.board.platform>.xml` |
 
 ## 已知限制
 
