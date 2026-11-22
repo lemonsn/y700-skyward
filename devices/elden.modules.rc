@@ -1,0 +1,8 @@
+# The touchscreen's driver and what it needs, put in the kernel by init:
+# the recovery's own domain is not allowed to load modules on this phone,
+# and init's insmod runs in init's own, which is.
+
+on property:sys.skyward.modules=1
+    insmod /lib/modules/hqsysfs.ko
+    insmod /lib/modules/panel_event_notifier.ko
+    insmod /lib/modules/nvt_36xxx.ko
