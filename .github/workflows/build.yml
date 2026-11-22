@@ -32,6 +32,13 @@ jobs:
       - name: Use the elden configuration
         run: cp devices/elden.toml skyward/devices/elden.toml
 
+      - name: Apply the port's patches
+        run: |
+          for patch in tools/patches/*.patch; do
+            echo "applying $patch"
+            git -C skyward apply "$GITHUB_WORKSPACE/$patch"
+          done
+
       - name: Install the Rust toolchain rust-toolchain.toml names
         working-directory: skyward
         run: rustup toolchain install --no-self-update

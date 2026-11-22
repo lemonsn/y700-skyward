@@ -1,0 +1,32 @@
+--- a/crates/skyward/src/ui.rs
++++ b/crates/skyward/src/ui.rs
+@@ -110,7 +110,7 @@
+                 .parse()
+                 .with_context(|| format!("parse {name}"))
+         };
+-        let top = normal_max(read("max_brightness")?)?;
++        let top = normal_max(read("max_brightness")?);
+         let level = read("brightness")?;
+         Ok(Backlight { path: dir.join("brightness"), top, level })
+     }
+@@ -147,7 +147,19 @@
+ /// Above it the panel runs in high brightness mode, which the stock system
+ /// keeps for strong sunlight and its slider does not reach. The panel the
+ /// display driver booted with gives that maximum in the device tree.
+-fn normal_max(max: u32) -> Result<u32> {
++fn normal_max(max: u32) -> u32 {
++    match panel_normal_max(max) {
++        Ok(top) => top,
++        Err(e) => {
++            eprintln!("the panel gives no normal maximum, so the backlight's whole range is the slider's: {e:#}");
++            max
++        }
++    }
++}
++
++/// The panel's normal maximum where its node in the device tree gives one, as
++/// the phones whose maker names it there do.
++fn panel_normal_max(max: u32) -> Result<u32> {
+     let param = "/sys/module/msm_drm/parameters/dsi_display0";
+     let boot = fs::read_to_string(param).with_context(|| format!("read {param}"))?;
+     // The panel's node, then its configuration after a colon, as in
