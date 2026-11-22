@@ -10,7 +10,7 @@ permissions:
 
 env:
   SKYWARD_REPO: https://github.com/lemonsn/skyward.git
-  SKYWARD_COMMIT: f1c7b4366be662d7b8d0e332d1c783e2199dac86
+  SKYWARD_COMMIT: 2cf081e0cfc4024389570df7cee0d15b0bb2bf75
   STOCK_URL: https://github.com/lemonsn/y700-skyward/releases/download/stock-elden/recovery.img
   STOCK_SHA256: f5684d262a702376d94f5f8338f176e264f81176ef6e4696091da5bf88e7de08
   PARTITION_SIZE: "104857600"
@@ -82,6 +82,7 @@ jobs:
             --mono skyward/resources/fonts/KirkMono-Regular.ttf \
             --mono-license skyward/resources/fonts/KirkMono-OFL.txt \
             --init-rc devices/elden.modules.rc \
+            --firmware-dir firmware \
             --out out/skyward-elden.img
 
       - name: Run the recovery with SELinux permissive

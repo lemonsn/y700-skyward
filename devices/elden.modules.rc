@@ -1,6 +1,9 @@
-# The touchscreen's driver and what it needs, put in the kernel by init:
-# the recovery's own domain is not allowed to load modules on this phone,
-# and init's insmod runs in init's own, which is.
+# What init alone may do on this phone: the recovery's own domain may not
+# load modules, and the kernel asks for a driver's firmware through the
+# recovery's own lookup only once it is told to.
+
+on early-init
+    write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
 on property:sys.skyward.modules=1
     insmod /lib/modules/hqsysfs.ko
