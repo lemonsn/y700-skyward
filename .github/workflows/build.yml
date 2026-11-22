@@ -1,0 +1,105 @@
+name: Build Skyward for elden
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SKYWARD_COMMIT: dc7f769dd39d32595bbe407ceca12ef40ef39fb1
+  STOCK_URL: https://github.com/lemonsn/y700-skyward/releases/download/stock-elden/recovery.img
+  STOCK_SHA256: f5684d262a702376d94f5f8338f176e264f81176ef6e4696091da5bf88e7de08
+  PARTITION_SIZE: "104857600"
+
+jobs:
+  build:
+    name: Build the recovery image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out Skyward
+        run: |
+          git init skyward
+          cd skyward
+          git remote add origin https://github.com/kirklin/skyward.git
+          git fetch --depth 1 origin "$SKYWARD_COMMIT"
+          git checkout FETCH_HEAD
+
+      - name: Use the elden configuration
+        run: cp devices/elden.toml skyward/devices/elden.toml
+
+      - name: Install the Rust toolchain rust-toolchain.toml names
+        working-directory: skyward
+        run: rustup toolchain install --no-self-update
+
+      - name: Install the Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: false
+
+      - name: Point cargo-ndk at that NDK
+        run: echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+
+      - name: Build cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Build the recovery service
+        working-directory: skyward
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+
+      - name: Build the second system's first program, static
+        working-directory: skyward
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward-system-init --target-dir target/system-init
+
+      - name: Build the packer
+        working-directory: skyward
+        run: cargo build --locked --release -p skyward-pack
+
+      - name: Fetch the stock recovery partition
+        run: |
+          mkdir -p stock
+          curl -fL --retry 3 -o stock/recovery.img "$STOCK_URL"
+          echo "$STOCK_SHA256  stock/recovery.img" | sha256sum -c -
+
+      - name: Pack the image on top of the stock recovery
+        run: |
+          mkdir -p out
+          skyward/target/release/skyward-pack recovery \
+            --stock stock/recovery.img \
+            --binary skyward/target/aarch64-linux-android/release/skyward \
+            --system-init skyward/target/system-init/aarch64-linux-android/release/system-init \
+            --config devices/elden.toml \
+            --font skyward/resources/fonts/MiSansVF.ttf \
+            --mono skyward/resources/fonts/KirkMono-Regular.ttf \
+            --mono-license skyward/resources/fonts/KirkMono-OFL.txt \
+            --out out/skyward-elden.img
+
+      - name: Sign the footer with the test key the bootloader accepts
+        run: |
+          salt=$(printf 'skyward-elden' | sha256sum | cut -d' ' -f1)
+          python3 tools/sign_image.py out/skyward-elden.img \
+            --avbtool tools/avbtool.py \
+            --key tools/testkey_rsa4096.pem \
+            --partition-size "$PARTITION_SIZE" \
+            --salt "$salt"
+
+      - name: Check the image
+        run: |
+          python3 tools/check_image.py out/skyward-elden.img
+          sha256sum out/skyward-elden.img | tee out/skyward-elden.img.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skyward-elden
+          path: |
+            out/skyward-elden.img
+            out/skyward-elden.img.sha256
+          if-no-files-found: error

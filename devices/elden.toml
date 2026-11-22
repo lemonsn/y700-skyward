@@ -1,0 +1,89 @@
+[device]
+codename = "elden"
+brand = "Lenovo"
+model = "Lenovo Legion Y700 (4th Gen)"
+ab = true
+soc = { hans = "骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite 行動平台", en = "Snapdragon® 8 Elite Mobile Platform" }
+os_version_prop = "ro.build.display.id"
+
+[display]
+width = 1904
+height = 3040
+density = 440
+diagonal = 8.8
+
+[modules]
+# rfkill, which cfg80211 asks for, is one of the kernel's own modules in
+# system_dlkm, and the touchscreen's driver and the vibration driver are in
+# vendor_dlkm; the vendor_boot ramdisk carries the first-stage copies.
+sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
+# Novatek NVT-ts over SPI, reading its firmware from /vendor/firmware.
+# The panel is driven as csot 3k, which the driver picks from the device
+# tree, and it reports positions itself, as Lenovo's own touch HAL is not
+# run here.
+load = ["nvt_36xxx"]
+
+# The WLAN firmware and the apps the secure world runs for the secure
+# element are on the modem partition, which the phone mounts at
+# /vendor/firmware_mnt and its own recovery leaves unmounted.
+[firmware]
+partition = "modem"
+
+# The persist partition, which the phone mounts at /mnt/vendor/persist and
+# its own recovery leaves unmounted: the secure world keeps its own files
+# there, among them what the key service needs to use a key that cannot be
+# rolled back, and the WLAN's MAC address.
+[partitions]
+mounted = ["persist"]
+
+# What the phone's own init runs once the system has finished starting: the
+# kernel starts both CPU clusters on the performance governor and
+# Qualcomm's idle driver keeps idle CPUs from powering down until it is
+# told otherwise, which leaves the phone heating up while idle.
+[[service]]
+path = "/vendor/bin/sh"
+args = ["/vendor/bin/init.kernel.post_boot.sh"]
+libraries = ["/system/lib64", "/vendor/lib64"]
+oneshot = true
+user = "root"
+groups = ["root", "system", "wakelock", "graphics"]
+
+# WLAN: the WCN7850 on PCIe, driven by qca_cld3_kiwi_v2 over the cnss2
+# platform driver. Once fs_ready is written, cnss2 powers the chip up and
+# loads its firmware from the modem partition, and wlan0 appears. The
+# driver reads its settings and the MAC address through the firmware
+# loader; the vendor partition keeps the settings in its own wifi folder,
+# which a recovery covers with the modem's, so both are given to the
+# loader again: the settings from the vendor partition, the address from
+# persist.
+[wlan]
+modules = ["rfkill", "qca_cld3_kiwi_v2"]
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+firmware = [
+    { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin" },
+]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/vendor/lib64", "/system/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connectivitycheck.gstatic.com/generate_204"
+
+# The partitions a backup of the baseband and EFS takes: the baseband's
+# settings, with the IMEI, and the sensors' calibration. And what of the
+# data partition a backup leaves out because the secure world keeps it in
+# step with itself.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = ["vendor/tzstorage", "vendor/qtee", "vendor/goodix", "vendor/fingerprint", "vendor/fpdata"]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/vendor/diag",
+    "/data/vendor/ramdump",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+    "/data/vendor/log",
+]
