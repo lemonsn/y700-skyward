@@ -83,6 +83,9 @@ jobs:
             --mono-license skyward/resources/fonts/KirkMono-OFL.txt \
             --out out/skyward-elden.img
 
+      - name: Run the recovery with SELinux permissive
+        run: python3 tools/patch_cmdline.py out/skyward-elden.img androidboot.selinux=permissive
+
       - name: Sign the footer with the test key the bootloader accepts
         run: |
           salt=$(printf 'skyward-elden' | sha256sum | cut -d' ' -f1)
