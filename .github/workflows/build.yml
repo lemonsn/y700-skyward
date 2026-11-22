@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 env:
-  SKYWARD_COMMIT: dc7f769dd39d32595bbe407ceca12ef40ef39fb1
+  SKYWARD_REPO: https://github.com/lemonsn/skyward.git
+  SKYWARD_COMMIT: ff709ac2afe7a70f086b01e930e52da940fd252e
   STOCK_URL: https://github.com/lemonsn/y700-skyward/releases/download/stock-elden/recovery.img
   STOCK_SHA256: f5684d262a702376d94f5f8338f176e264f81176ef6e4696091da5bf88e7de08
   PARTITION_SIZE: "104857600"
@@ -25,19 +26,12 @@ jobs:
         run: |
           git init skyward
           cd skyward
-          git remote add origin https://github.com/kirklin/skyward.git
+          git remote add origin $SKYWARD_REPO
           git fetch --depth 1 origin "$SKYWARD_COMMIT"
           git checkout FETCH_HEAD
 
       - name: Use the elden configuration
         run: cp devices/elden.toml skyward/devices/elden.toml
-
-      - name: Apply the port's patches
-        run: |
-          for patch in tools/patches/*.patch; do
-            echo "applying $patch"
-            git -C skyward apply "$GITHUB_WORKSPACE/$patch"
-          done
 
       - name: Install the Rust toolchain rust-toolchain.toml names
         working-directory: skyward
