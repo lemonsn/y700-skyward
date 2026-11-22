@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--partition-size", type=int, required=True)
     parser.add_argument("--partition-name", default="recovery")
     parser.add_argument("--salt", required=True)
-    parser.add_argument("--rollback-index", type=int, default=0)
+    parser.add_argument("--rollback-index", type=int, default=1)
     args = parser.parse_args()
 
     with open(args.image, "rb") as f:

@@ -89,6 +89,7 @@ jobs:
             --avbtool tools/avbtool.py \
             --key tools/testkey_rsa4096.pem \
             --partition-size "$PARTITION_SIZE" \
+            --rollback-index 1 \
             --salt "$salt"
 
       - name: Check the image

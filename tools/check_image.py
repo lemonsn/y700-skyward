@@ -18,6 +18,11 @@ def main(image):
     assert kernel == 0, "the stock recovery carries no kernel of its own"
     assert len(data) == PARTITION_SIZE, f"the image fills {len(data)} bytes, not the partition"
     assert data[-64:-60] == b"AVBf", "the image does not end in an AVB footer"
+    image_size, vbmeta_offset = struct.unpack_from(">QQ", data, len(data) - 64 + 12)
+    rollback = struct.unpack_from(">Q", data, vbmeta_offset + 112)[0]
+    print(f"vbmeta_offset={vbmeta_offset} image_size={image_size} rollback_index={rollback}")
+    assert data[vbmeta_offset:vbmeta_offset + 4] == b"AVB0", "no vbmeta image where the footer points"
+    assert rollback >= 1, "a rollback index below the one the bootloader has stored is refused"
 
 
 if __name__ == "__main__":
