@@ -1,11 +1,40 @@
 # What init alone may do on this phone: the recovery's own domain may not
 # load modules, and the kernel asks for a driver's firmware through the
-# recovery's own lookup only once it is told to.
+# recovery's own lookup only once it is told to. The secure world's own
+# programs start here as they do under the phone's init, each in its own
+# domain, rather than from the recovery's.
 
 on early-init
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
+    # The description of the hardware this phone runs, which its vendor
+    # scripts would name from the SoC id; the recovery's own cannot run
+    # those, and the programs below are enabled by it.
+    setprop ro.boot.product.vendor.sku sun
 
 on property:sys.skyward.modules=1
     insmod /lib/modules/hqsysfs.ko
     insmod /lib/modules/panel_event_notifier.ko
     insmod /lib/modules/nvt_36xxx.ko
+
+    mkdir /mnt/vendor/persist 0770 root system
+    mkdir /mnt/vendor/persist/secnvm 0770 system system
+    mkdir /mnt/vendor/persist/spudc 0770 system system
+    mkdir /mnt/vendor/spunvm 0660 system system
+    mount vfat /dev/block/by-name/spunvm /mnt/vendor/spunvm
+
+    wait /sys/kernel/boot_adsp/ssr 5
+    write /sys/kernel/boot_adsp/ssr 1
+
+    start vendor.qseecomd
+    start vendor.minkdaemon
+    start vendor.ssgtzd
+    start vendor.keymint-qti
+    start vendor.keymint-spu-qti
+    start vendor.gatekeeper_default
+    start vendor.gatekeeper_spu
+    start vendor.spdaemon
+    start vendor.sec_nvm
+    start vendor.spu_weaver
+    start vendor.boot-qti
+
+    setprop sys.skyward.keys 1
