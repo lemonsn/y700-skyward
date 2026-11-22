@@ -1,0 +1,141 @@
+diff --git a/crates/skyward-modules/src/lib.rs b/crates/skyward-modules/src/lib.rs
+index ec33ac9..e1ab408 100644
+--- a/crates/skyward-modules/src/lib.rs
++++ b/crates/skyward-modules/src/lib.rs
+@@ -8,15 +8,26 @@ pub mod modprobe;
+ /// Where a module source's files are in the recovery: the vendor_boot
+ /// ramdisk's modules under /lib/modules, the vendor_dlkm and vendor
+ /// partitions where they are mounted, and the kernel's own modules in
+-/// system_dlkm, which it also keeps in one folder.
+-pub fn source_dir(source: &str) -> Result<PathBuf> {
+-    Ok(PathBuf::from(match source {
+-        "vendor_boot" => "/lib/modules",
+-        "vendor_dlkm" => "/vendor_dlkm/lib/modules",
+-        "vendor" => "/vendor/lib/modules",
+-        "system_dlkm" => "/system_dlkm/flatten/lib/modules",
++/// system_dlkm, which keeps them under /system_dlkm/lib/modules where it
++/// mounts that partition, or under flatten/ where AOSP's build puts them.
++pub fn source_dirs(source: &str) -> Result<Vec<PathBuf>> {
++    Ok(match source {
++        "vendor_boot" => vec![PathBuf::from("/lib/modules")],
++        "vendor_dlkm" => vec![PathBuf::from("/vendor_dlkm/lib/modules")],
++        "vendor" => vec![PathBuf::from("/vendor/lib/modules")],
++        "system_dlkm" => vec![
++            PathBuf::from("/system_dlkm/lib/modules"),
++            PathBuf::from("/system_dlkm/flatten/lib/modules"),
++        ],
+         _ => bail!("unknown module source {source:?}"),
+-    }))
++    })
++}
++
++/// The one folder a source's modules are read from: the first of its
++/// layouts that exists, or the first named where none does.
++pub fn source_dir(source: &str) -> Result<PathBuf> {
++    let dirs = source_dirs(source)?;
++    Ok(dirs.iter().find(|d| d.is_dir()).cloned().unwrap_or_else(|| dirs[0].clone()))
+ }
+ 
+ /// Load `names` (module names without `.ko`) with their dependencies. Each
+@@ -33,8 +44,17 @@ pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
+             .ok_or_else(|| anyhow!("{file} is in none of {dirs:?}"))?;
+         let graph = parse_dep(dir)?;
+         for m in graph.load_order(std::slice::from_ref(&file)) {
+-            let path = graph
+-                .resolve_path(&m)
++            // A module's dependencies are not always in the folder its own
++            // modules.dep came from: cfg80211 is on vendor_dlkm and depends
++            // on rfkill, which is on system_dlkm, so every folder the
++            // configuration named is searched before the file is called
++            // missing.
++            let path = dirs
++                .iter()
++                .find_map(|d| {
++                    let direct = d.join(&m);
++                    direct.is_file().then_some(direct).or_else(|| find_file(d, &m))
++                })
+                 .ok_or_else(|| anyhow!("{m} is listed in {}/modules.dep but missing", dir.display()))?;
+             insmod(&path, "")?;
+             loaded.push(path);
+diff --git a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
+index 5fe1917..7b5c644 100644
+--- a/crates/skyward/src/main.rs
++++ b/crates/skyward/src/main.rs
+@@ -507,7 +507,17 @@ fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {
+ 
+ /// Load `names` from the module sources the configuration lists.
+ fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
+-    let dirs = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
++    // A source may keep its modules in more than one layout, as system_dlkm
++    // does; every one of them is searched, in the order the source names.
++    let dirs: Vec<_> = cfg
++        .modules
++        .sources
++        .iter()
++        .map(|s| skyward_modules::source_dirs(s))
++        .collect::<Result<Vec<_>>>()?
++        .into_iter()
++        .flatten()
++        .collect();
+     skyward_modules::load(&dirs, names)
+ }
+ 
+diff --git a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
+index 8ed3ceb..80607bb 100644
+--- a/crates/skyward/src/ui.rs
++++ b/crates/skyward/src/ui.rs
+@@ -110,7 +110,7 @@ impl Backlight {
+                 .parse()
+                 .with_context(|| format!("parse {name}"))
+         };
+-        let top = normal_max(read("max_brightness")?)?;
++        let top = normal_max(read("max_brightness")?);
+         let level = read("brightness")?;
+         Ok(Backlight { path: dir.join("brightness"), top, level })
+     }
+@@ -141,13 +141,27 @@ const NORMAL_MAX: [(&str, &str); 3] = [
+     ("mi,normal-max-brightness-clone", "mi,max-brightness-clone"),
+     ("mi,max-brightness-normal", "qcom,mdss-dsi-bl-max-level"),
+     ("mi,mdss-dsi-fac-bl-max-level", "qcom,mdss-dsi-bl-max-level"),
++    // Qualcomm's own panels, as on the Y700: the level the stock slider
++    // stops at, and the whole of the backlight's range beside it.
++    ("qcom,mdss-brightness-max-level", "qcom,mdss-dsi-bl-max-level"),
+ ];
+ 
+ /// The raw backlight level, out of `max`, at the panel's normal maximum.
+ /// Above it the panel runs in high brightness mode, which the stock system
+ /// keeps for strong sunlight and its slider does not reach. The panel the
+ /// display driver booted with gives that maximum in the device tree.
+-fn normal_max(max: u32) -> Result<u32> {
++fn normal_max(max: u32) -> u32 {
++    match panel_normal_max(max) {
++        Ok(top) => top,
++        Err(e) => {
++            eprintln!("the panel gives no normal maximum, so the backlight's whole range is the slider's: {e:#}");
++            max
++        }
++    }
++}
++
++/// The panel's normal maximum where its node in the device tree gives one.
++fn panel_normal_max(max: u32) -> Result<u32> {
+     let param = "/sys/module/msm_drm/parameters/dsi_display0";
+     let boot = fs::read_to_string(param).with_context(|| format!("read {param}"))?;
+     // The panel's node, then its configuration after a colon, as in
+@@ -1537,7 +1551,15 @@ impl<'a> Pages<'a> {
+         // libraries the supplicant does not start, and the WLAN page says why.
+         if let Some(w) = &cfg.wlan {
+             self.app.state.wlan = Some(Wlan::default());
+-            let modules = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
++            let modules: Vec<_> = cfg
++                .modules
++                .sources
++                .iter()
++                .map(|s| skyward_modules::source_dirs(s))
++                .collect::<Result<Vec<_>>>()?
++                .into_iter()
++                .flatten()
++                .collect();
+             let libraries = secure::libraries().unwrap_or_else(|e| {
+                 let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
+                 None
